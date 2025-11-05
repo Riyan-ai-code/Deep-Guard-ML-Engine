@@ -16,7 +16,9 @@ from fastapi.responses import JSONResponse
 from typing import List
 
 
+
 router = APIRouter()
+
 
 
 
@@ -96,6 +98,13 @@ async def predict_images(files: List[UploadFile] = File(...), background_tasks: 
         scores = [s for s in scores if s is not None]
         avg_score = float(sum(scores) / len(scores)) if scores else 0.0
         
+        # Create image-wise confidence array in sorted order
+        sorted_images = sorted(all_results.items(), key=lambda x: x[0])
+        image_confidences = [
+            round(extract_float(confidence), 4) if extract_float(confidence) is not None else None
+            for image_name, confidence in sorted_images
+        ]
+        
         # Annotate images in each folder
         for folder_name in os.listdir(batch_folder):
             folder_path = os.path.join(batch_folder, folder_name)
@@ -127,6 +136,28 @@ async def predict_images(files: List[UploadFile] = File(...), background_tasks: 
                 content={"detail": "No annotated results generated"}
             )
         
+        # Save confidence report as JSON file inside all_annotated_results
+        confidence_report = {
+            "batch_id": batch_id,
+            "total_images": len(all_results),
+            "images_analyzed": len(all_results),
+            "images_uploaded": len(files),
+            "preprocessing_errors": len(preprocessing_errors),
+            "average_confidence": round(avg_score, 4),
+            "image_wise_confidences": image_confidences
+        }
+        
+        confidence_json_path = combined_annotated_folder / "confidence_report.json"
+        try:
+            with open(confidence_json_path, 'w') as f:
+                json.dump(confidence_report, f, indent=2)
+        except Exception as e:
+            background_tasks.add_task(delayed_cleanup, batch_folder, delay=60)
+            return JSONResponse(
+                status_code=500,
+                content={"detail": f"Failed to create confidence report: {str(e)}"}
+            )
+        
         # Create zip file
         zip_filename = f"{batch_id}_annotated_images"
         zip_path = Path(batch_folder) / zip_filename
@@ -147,7 +178,7 @@ async def predict_images(files: List[UploadFile] = File(...), background_tasks: 
         # Schedule cleanup for success case
         background_tasks.add_task(delayed_cleanup, batch_folder, delay=60)
         
-        # Return the zip file
+        # Return the zip file with confidence data in headers
         response = FileResponse(
             path=zip_file_path,
             media_type="application/zip",
@@ -155,8 +186,9 @@ async def predict_images(files: List[UploadFile] = File(...), background_tasks: 
             background=background_tasks
         )
         
+        response.headers["X-Batch-ID"] = batch_id
         response.headers["X-Images-Analyzed"] = str(len(all_results))
-        response.headers["X-Average-Score"] = str(round(avg_score, 4))
+        response.headers["X-Average-Confidence"] = str(round(avg_score, 4))
         response.headers["X-Images-Uploaded"] = str(len(files))
         response.headers["X-Preprocessing-Errors"] = str(len(preprocessing_errors))
         
