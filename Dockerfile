@@ -8,11 +8,13 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install
-COPY requirements.txt ./
+# FIX: The source path now starts from the repository root (e.g., Deep-Guard-ML-Engine/)
+COPY Deep-Guard-ML-Engine/requirements.txt ./ 
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy app source
-COPY app ./app
+# FIX: The source path now starts from the repository root (e.g., Deep-Guard-ML-Engine/app)
+COPY Deep-Guard-ML-Engine/app ./app
 
 ENV PYTHONUNBUFFERED=1
 
